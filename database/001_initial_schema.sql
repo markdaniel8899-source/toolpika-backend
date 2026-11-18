@@ -132,23 +132,26 @@ create index if not exists tools_usage_count_idx
   where status = 'live';
 
 -- -----------------------------------------------------------------------------
--- Tool requests
+-- Unified inbox (tool requests + contact messages)
 -- -----------------------------------------------------------------------------
-create table if not exists public.tool_requests (
+create table if not exists public.inbox_messages (
   id uuid primary key default gen_random_uuid(),
-  tool_name text not null,
-  description text not null,
+  type text not null check (type in ('tool_request', 'contact')),
+  name text,
   email text,
-  status text not null default 'new' check (status in ('new', 'building', 'launched')),
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  tool_name text,
+  description text not null,
+  status text not null default 'new' check (status in ('new', 'in_progress', 'resolved', 'rejected')),
+  created_at timestamptz not null default now()
 );
 
-comment on table public.tool_requests is
-  'Submissions from the /request page. Free text only — no files.';
+comment on table public.inbox_messages is
+  'Unified inbox for /request and /contact submissions. Free text only — no files.';
 
-create index if not exists tool_requests_status_idx
-  on public.tool_requests (status, created_at desc);
+create index if not exists inbox_type_idx on public.inbox_messages (type);
+create index if not exists inbox_status_idx on public.inbox_messages (status);
+create index if not exists inbox_created_idx
+  on public.inbox_messages (created_at desc);
 
 -- -----------------------------------------------------------------------------
 -- Blog posts
@@ -249,11 +252,6 @@ create trigger profiles_set_updated_at
 drop trigger if exists tools_set_updated_at on public.tools;
 create trigger tools_set_updated_at
   before update on public.tools
-  for each row execute function private.set_updated_at();
-
-drop trigger if exists tool_requests_set_updated_at on public.tool_requests;
-create trigger tool_requests_set_updated_at
-  before update on public.tool_requests
   for each row execute function private.set_updated_at();
 
 drop trigger if exists posts_set_updated_at on public.posts;

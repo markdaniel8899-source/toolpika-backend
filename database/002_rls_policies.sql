@@ -15,7 +15,7 @@
 alter table public.profiles enable row level security;
 alter table public.categories enable row level security;
 alter table public.tools enable row level security;
-alter table public.tool_requests enable row level security;
+alter table public.inbox_messages enable row level security;
 alter table public.posts enable row level security;
 alter table public.post_views_daily enable row level security;
 alter table public.site_settings enable row level security;
@@ -104,22 +104,36 @@ create policy tools_admin_write
   with check ((select private.is_admin()));
 
 -- -----------------------------------------------------------------------------
--- tool_requests — anyone may submit, only admin may read/manage
+-- inbox_messages — anyone may submit, only admin may read/manage
 -- -----------------------------------------------------------------------------
-drop policy if exists tool_requests_insert_public on public.tool_requests;
-create policy tool_requests_insert_public
-  on public.tool_requests
+drop policy if exists inbox_public_insert on public.inbox_messages;
+create policy inbox_public_insert
+  on public.inbox_messages
   for insert
   to anon, authenticated
   with check (true);
 
-drop policy if exists tool_requests_admin_all on public.tool_requests;
-create policy tool_requests_admin_all
-  on public.tool_requests
-  for all
+drop policy if exists inbox_admin_select on public.inbox_messages;
+create policy inbox_admin_select
+  on public.inbox_messages
+  for select
+  to authenticated
+  using ((select private.is_admin()));
+
+drop policy if exists inbox_admin_update on public.inbox_messages;
+create policy inbox_admin_update
+  on public.inbox_messages
+  for update
   to authenticated
   using ((select private.is_admin()))
   with check ((select private.is_admin()));
+
+drop policy if exists inbox_admin_delete on public.inbox_messages;
+create policy inbox_admin_delete
+  on public.inbox_messages
+  for delete
+  to authenticated
+  using ((select private.is_admin()));
 
 -- -----------------------------------------------------------------------------
 -- posts — published posts are public
