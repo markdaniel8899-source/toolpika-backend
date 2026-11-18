@@ -16,7 +16,10 @@ create table if not exists public.tools (
   description text not null,
   status text not null default 'live',
   usage_count integer not null default 0,
-  created_at timestamptz not null default now()
+  seo_title text,
+  seo_description text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists public.inbox_messages (
@@ -30,6 +33,43 @@ create table if not exists public.inbox_messages (
   created_at timestamptz not null default now()
 );
 
+-- Blog posts. Admin writes these; published ones feed the /guides area.
+create table if not exists public.posts (
+  id uuid primary key default gen_random_uuid(),
+  slug text not null unique,
+  title text not null,
+  content text not null,
+  status text not null default 'draft' check (status in ('draft', 'published')),
+  seo_title text,
+  seo_description text,
+  seo_score integer,
+  views integer not null default 0,
+  published_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Anonymous, aggregate post view counts per day. No visitor identity stored.
+create table if not exists public.post_views (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.posts(id) on delete cascade,
+  day date not null default current_date,
+  views integer not null default 0,
+  unique (post_id, day)
+);
+
+-- Site settings as key/value rows so the admin form persists real values.
+create table if not exists public.site_settings (
+  key text primary key,
+  value text not null default '',
+  updated_at timestamptz not null default now()
+);
+
+-- Backfill columns on databases created from the older minimal schema.
+alter table public.tools add column if not exists seo_title text;
+alter table public.tools add column if not exists seo_description text;
+alter table public.tools add column if not exists updated_at timestamptz not null default now();
+
 -- Seed tools
 insert into public.tools (slug, title, category, icon, description, status) values
   ('word-counter',       'Word Counter',             'text',      'FileText',   'Count words, characters, sentences and paragraphs.', 'live'),
@@ -41,3 +81,13 @@ insert into public.tools (slug, title, category, icon, description, status) valu
   ('url-encoder',        'URL Encoder / Decoder',    'converter', 'Link',       'Encode or decode URLs.',                             'live'),
   ('base64-encoder',     'Base64 Encoder / Decoder', 'converter', 'Copy',       'Encode or decode Base64 strings.',                   'live')
 on conflict (slug) do nothing;
+
+-- Seed default site settings (only inserted when missing, never overwrite edits).
+insert into public.site_settings (key, value) values
+  ('siteName', 'Toolpika'),
+  ('siteUrl', ''),
+  ('socialGithub', ''),
+  ('socialX', ''),
+  ('socialLinkedIn', ''),
+  ('themeDefault', 'system')
+on conflict (key) do nothing;
