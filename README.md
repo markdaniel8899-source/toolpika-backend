@@ -17,12 +17,7 @@ bash scripts/run_server.sh
 # http://localhost:8000/docs
 ```
 
-Docker (from the **repository root**, because the template lives in `/markdown`):
-
-```bash
-docker build -f backend/Dockerfile -t toolpika-backend .
-docker compose -f backend/docker-compose.yml up -d
-```
+Deployment is systemd + uvicorn based; see `scripts/deploy.sh`.
 
 ---
 
@@ -88,14 +83,14 @@ Translations are keyed by `(locale, slug, chunk)`.
 
 ## Deployment (one paragraph)
 
-Provision a small Linux VM with Docker and Caddy, copy the repository to
-`/opt/toolpika`, create `/opt/toolpika/backend/.env` from `.env.example` with
-real Supabase, Tavily, NVIDIA NIM and Groq keys, build the image from the repo
-root (`docker build -f backend/Dockerfile .`), apply both SQL migrations in
-Supabase, then run the container behind Caddy using the included `Caddyfile`
-pointing `api.toolpika.site` at `localhost:8000`. Set a systemd unit (or compose
-restart policy) to keep it alive, add `BACKEND_API_URL=https://api.toolpika.site`
-to the Next.js environment, and verify with `curl https://api.toolpika.site/ready`.
+Provision a small Linux VM, copy the repository to `/opt/toolpika`, create
+`/opt/toolpika/backend/.env` from `.env.example` with real Supabase, Tavily,
+NVIDIA NIM and Groq keys, then run `bash scripts/deploy.sh` (it installs
+requirements, prints the migration SQL and restarts the systemd service).
+Apply both SQL migrations in Supabase, put your own reverse proxy (nginx/Caddy)
+in front pointing `api.toolpika.site` at `localhost:8000`, add
+`BACKEND_API_URL=https://api.toolpika.site` to the Next.js environment, and
+verify with `curl https://api.toolpika.site/ready`.
 Cron runs at 03:00 UTC by default and the T+5-minute translation job is queued
 in-process, so a restart before it fires will drop that single job — use QStash
 or a DB-backed queue if that must survive restarts.
@@ -119,7 +114,7 @@ or a DB-backed queue if that must survive restarts.
    (`word-counter`, `case-converter`, `base64-*`, `json-formatter`, `url-*`).
    Unknown tools get a structural check: the TypeScript implementation cannot
    be executed from Python.
-5. **No auth on admin endpoints.** Put Caddy basic auth or a gateway in front of
+5. **No auth on admin endpoints.** Put basic auth at your reverse proxy or a gateway in front of
    `/api/admin/*` and `/api/pipeline/*` before public deployment.
 6. **Reading-level warning** is a sentence-length heuristic, not a full
    Flesch–Kincaid implementation.
