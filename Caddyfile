@@ -1,0 +1,17 @@
+api.toolpika.site {
+    reverse_proxy localhost:8000
+
+    header {
+        -Server
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    encode gzip
+
+    log {
+        output file /var/log/caddy/api.log
+        format json
+    }
+}

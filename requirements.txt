@@ -1,0 +1,33 @@
+# Core
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.3
+pydantic-settings==2.7.0
+python-dotenv==1.0.1
+
+# Supabase
+supabase==2.11.0
+postgrest==0.19.1
+
+# AI / LLM
+tavily-python==0.5.0
+groq==0.13.1
+httpx==0.28.1
+
+# Scheduling & Queue
+apscheduler==3.10.4
+# NOTE: `upstash-qstash==2.3.0` from the brief does not exist on PyPI.
+# Delayed jobs are implemented with APScheduler; QSTASH_* env vars are kept
+# as optional/reserved for a future hosted queue.
+
+# Validation & Testing
+jsonschema==4.23.0
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
+
+# Utilities
+python-multipart==0.0.20
+orjson==3.10.12
+structlog==24.4.0
+tenacity==9.0.0
