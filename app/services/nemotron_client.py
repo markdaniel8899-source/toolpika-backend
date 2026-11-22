@@ -30,6 +30,9 @@ def generate_json(system_prompt: str, user_prompt: str) -> dict[str, Any]:
         "model": settings.nemotron_model,
         "temperature": 0.3,
         "max_tokens": 4000,
+        # Nemotron 3.5 reasons by default; disable it so the response body is
+        # the JSON object rather than chain-of-thought text.
+        "chat_template_kwargs": {"enable_thinking": False},
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},

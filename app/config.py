@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     default_locales: str = "de,fr,es,it,pt-BR,ru,tr,ar,hi"
 
     nemotron_endpoint: str = "https://integrate.api.nvidia.com/v1/chat/completions"
-    nemotron_model: str = "nvidia/nemotron-3.5-super-vl"
+    nemotron_model: str = "nvidia/nemotron-3.5-super-vl-120b-a12b"
     groq_model: str = "llama-3.3-70b-versatile"
 
     template_path: str = ""
