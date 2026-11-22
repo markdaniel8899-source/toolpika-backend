@@ -246,6 +246,10 @@ def context_digest(context: dict[str, Any]) -> dict[str, Any]:
             1 for tool in tools if tool.get("status") == "published"
         ),
         "locales": site.get("locales") or [],
+        "tools": [
+            {"slug": str(tool.get("slug") or ""), "name": str(tool.get("name") or "")}
+            for tool in tools[:30]
+        ],
         "relevant_slugs": [
             str(spec.get("slug"))
             for spec in context.get("relevant_specs") or []

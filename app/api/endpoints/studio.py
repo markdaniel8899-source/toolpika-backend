@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter
 
 from app.api.models.requests import (
+    StudioAutoRunRequest,
     StudioChatRequest,
     StudioPlanRequest,
     StudioSessionRequest,
@@ -66,7 +68,18 @@ async def chat(session_id: str, payload: StudioChatRequest) -> dict[str, Any]:
 @router.post("/sessions/{session_id}/plan")
 async def plan(session_id: str, payload: StudioPlanRequest) -> dict[str, Any]:
     _enabled()
-    return service.research_and_plan(session_id, payload.idea, payload.source_url)
+    return await asyncio.to_thread(
+        service.research_and_plan, session_id, payload.idea, payload.source_url
+    )
+
+
+@router.post("/sessions/{session_id}/auto-run")
+async def auto_run(session_id: str, payload: StudioAutoRunRequest) -> dict[str, Any]:
+    """Run research → plan → codegen → apply → translate → publish in one go."""
+    _enabled()
+    return await service.auto_run(
+        session_id, payload.idea, payload.source_url, payload.locales
+    )
 
 
 @router.post("/sessions/{session_id}/generate")

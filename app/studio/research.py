@@ -185,6 +185,8 @@ def _fallback_analysis(idea: str, page: dict[str, Any] | None) -> dict[str, Any]
         "keywords": [idea] if idea else [title],
         "suggested_name": title[:80],
         "suggested_slug": _slugify(title),
+        "should_build": True,
+        "reason": "The site has a clear gap for this browser-based tool.",
     }
 
 
@@ -200,7 +202,8 @@ def _model_analysis(
         "copy or design; identify features, gaps and a better original angle. "
         "Return ONLY JSON with keys: summary (string), features (3-8 strings), "
         "gaps (2-5 strings), keywords (3-8 strings), suggested_name (string), "
-        "suggested_slug (kebab-case string)."
+        "suggested_slug (kebab-case string), should_build (boolean), "
+        "reason (one short string explaining whether this tool is worth building)."
     )
     user_prompt = json.dumps(
         {
@@ -228,6 +231,8 @@ def _model_analysis(
         "suggested_slug": _slugify(
             str(result.get("suggested_slug") or fallback["suggested_slug"])
         ),
+        "should_build": bool(result.get("should_build", True)),
+        "reason": str(result.get("reason") or fallback["reason"])[:500],
     }
 
 
@@ -267,6 +272,8 @@ def research(idea: str | None = None, url: str | None = None) -> dict[str, Any]:
         "keywords": analysis["keywords"],
         "suggested_name": analysis["suggested_name"],
         "suggested_slug": analysis["suggested_slug"],
+        "should_build": analysis["should_build"],
+        "reason": analysis["reason"],
         "competitors": competitors,
         "page": page,
     }

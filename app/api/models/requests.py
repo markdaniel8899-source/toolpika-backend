@@ -52,3 +52,11 @@ class StudioTranslateRequest(BaseModel):
     """Translation target locales for the current draft."""
 
     locales: list[str] | None = None
+
+
+class StudioAutoRunRequest(BaseModel):
+    """Run the full studio pipeline for a decided tool."""
+
+    idea: str | None = Field(default=None, max_length=2000)
+    source_url: str | None = Field(default=None, max_length=2000)
+    locales: list[str] | None = None

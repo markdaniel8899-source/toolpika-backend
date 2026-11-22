@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 import structlog
@@ -40,6 +41,56 @@ _BUILD_PHRASES = (
     "can you create",
 )
 _INTENTS = {"chat", "build", "generate", "apply", "translate", "publish"}
+
+PIPELINE_STEPS: tuple[tuple[str, str, str], ...] = (
+    ("research", "Research the idea", "research"),
+    ("plan", "Build the blueprint", "plan"),
+    ("generate", "Generate code + page spec", "generate"),
+    ("apply", "Write the tool into the frontend", "apply"),
+    ("translate", "Translate with Groq", "translate"),
+    ("publish", "Publish to Supabase", "publish"),
+)
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _initial_pipeline(idea: str | None = None) -> dict[str, Any]:
+    """Create the visible pipeline state shown under the admin chat."""
+    return {
+        "running": False,
+        "idea": idea,
+        "started_at": None,
+        "finished_at": None,
+        "steps": [
+            {
+                "key": key,
+                "stage": stage,
+                "label": label,
+                "status": "pending",
+                "logs": [],
+                "started_at": None,
+                "finished_at": None,
+            }
+            for key, label, stage in PIPELINE_STEPS
+        ],
+    }
+
+
+def _pipeline_for(session: dict[str, Any] | None) -> dict[str, Any]:
+    stored = (session or {}).get("context", {}).get("pipeline")
+    if isinstance(stored, dict) and isinstance(stored.get("steps"), list):
+        return stored
+    return _initial_pipeline()
+
+
+def _write_pipeline(session_id: str, state: dict[str, Any]) -> None:
+    session = store.get_session(session_id)
+    if not session:
+        return
+    store.update_session(
+        session_id,
+        {"context": {**(session.get("context") or {}), "pipeline": state}},
+    )
 
 
 class StudioError(RuntimeError):
@@ -181,6 +232,7 @@ def _bundle(session_id: str) -> dict[str, Any]:
         "messages": messages,
         "draft": draft,
         "context": digest,
+        "pipeline": _pipeline_for(session),
     }
 
 
@@ -227,13 +279,18 @@ def create_session(
         log.warning("studio_create_context_failed", error=str(exc))
         digest = {}
     store.update_session(session["id"], {"context": {"digest": digest}})
+    available = ", ".join(
+        str(tool.get("name") or tool.get("slug"))
+        for tool in digest.get("tools") or []
+        if tool
+    )
     _record(
         session["id"],
         "assistant",
         (
             f"Studio ready. I can see {digest.get('tool_count', 0)} tools on the site "
-            f"right now. Describe the tool you want to add, paste a competitor URL, "
-            "or ask me to generate, translate or publish a draft."
+            f"right now: {available}. Describe the tool you want to add, paste a "
+            "competitor URL, or ask me what is already live."
         ),
         {"context": digest},
     )
@@ -344,7 +401,9 @@ async def generate(session_id: str) -> dict[str, Any]:
     _record(session_id, "user", "Generate the ToolSpec and the tool code.")
     session = _session_or_raise(session_id)
     research_result = (session.get("context") or {}).get("research") or {}
-    live_context = context.build_context(str(blueprint.get("name") or ""))
+    live_context = await asyncio.to_thread(
+        context.build_context, str(blueprint.get("name") or "")
+    )
     try:
         spec, validation, code_result = await asyncio.to_thread(
             _generate_sync, blueprint, research_result, live_context
@@ -542,7 +601,9 @@ async def publish(session_id: str) -> dict[str, Any]:
     if not spec:
         raise StudioError("Generate and QA the ToolSpec before publishing.")
     blueprint = draft.get("blueprint") or {}
-    live_context = context.build_context(str(blueprint.get("name") or spec.get("name") or ""))
+    live_context = await asyncio.to_thread(
+        context.build_context, str(blueprint.get("name") or spec.get("name") or "")
+    )
     known = [
         str(tool.get("slug"))
         for tool in (live_context.get("site") or {}).get("tools") or []
@@ -617,6 +678,125 @@ async def publish(session_id: str) -> dict[str, Any]:
     return _bundle(session_id)
 
 
+def _last_message(session_id: str) -> dict[str, Any] | None:
+    messages = store.list_messages(session_id)
+    return messages[-1] if messages else None
+
+
+async def auto_run(
+    session_id: str,
+    idea: str | None = None,
+    source_url: str | None = None,
+    locales: list[str] | None = None,
+) -> dict[str, Any]:
+    """Run the whole studio pipeline after the chat has decided the tool.
+
+    Progress is written to the session after every step so the admin page can
+    poll ``GET /api/studio/sessions/{id}`` and show what is happening now.
+    """
+    session = _session_or_raise(session_id)
+    idea = (idea or session.get("idea") or "").strip()
+    url = (source_url or session.get("source_url") or "").strip()
+    if not idea and not url:
+        raise StudioError("Describe the tool or provide a competitor URL first.")
+
+    state = _initial_pipeline(idea or url)
+    state["running"] = True
+    state["started_at"] = _now_iso()
+    _write_pipeline(session_id, state)
+    bundle: dict[str, Any] | None = None
+
+    for step in state["steps"]:
+        step["status"] = "running"
+        step["started_at"] = _now_iso()
+        step["logs"] = []
+        _write_pipeline(session_id, state)
+        try:
+            key = step["key"]
+            if key == "research":
+                bundle = await asyncio.to_thread(
+                    research_and_plan, session_id, idea, url, False
+                )
+                current = store.get_session(session_id) or {}
+                findings = (current.get("context") or {}).get("research") or {}
+                decision = "do not build yet" if findings.get("should_build") is False else "build"
+                step["logs"].append(
+                    f"Decision: {decision}. {findings.get('reason') or ''}".strip()
+                )
+                last = _last_message(session_id)
+                if last:
+                    step["logs"].append(last.get("content", ""))
+            elif key == "plan":
+                draft = store.get_latest_draft(session_id) or {}
+                blueprint = draft.get("blueprint") or {}
+                step["logs"].append(
+                    f"Blueprint ready: {blueprint.get('name')} ({blueprint.get('slug')})."
+                )
+            elif key == "generate":
+                bundle = await generate(session_id)
+                draft = (bundle.get("draft") or {})
+                status = str(draft.get("status") or "")
+                if status in {"qa_failed", "code_failed"}:
+                    qa = draft.get("qa") or {}
+                    errors = qa.get("spec", {}).get("errors") or []
+                    if not errors:
+                        errors = (qa.get("code") or {}).get("errors") or []
+                    raise StudioError(
+                        f"Generation stopped at {status}: " + "; ".join(errors[:5]),
+                        {"qa": qa},
+                    )
+                last = _last_message(session_id)
+                if last:
+                    step["logs"].append(last.get("content", ""))
+            elif key == "apply":
+                bundle = await apply(session_id)
+                last = _last_message(session_id)
+                if last:
+                    step["logs"].append(last.get("content", ""))
+                apply_info = (last or {}).get("artifacts", {}).get("apply") or {}
+                if not apply_info.get("applied"):
+                    step["logs"].append(str(apply_info.get("reason") or "Files not applied."))
+            elif key == "translate":
+                bundle = await translate(session_id, locales)
+                last = _last_message(session_id)
+                if last:
+                    step["logs"].append(last.get("content", ""))
+                translation = (last or {}).get("artifacts", {}).get("translation") or {}
+                if translation.get("failed_locales"):
+                    step["logs"].append(
+                        "Failed locales: " + ", ".join(translation["failed_locales"])
+                    )
+            elif key == "publish":
+                bundle = await publish(session_id)
+                draft = bundle.get("draft") or {}
+                if draft.get("status") == "qa_failed":
+                    raise StudioError("Publish blocked: the spec no longer passes QA.")
+                last = _last_message(session_id)
+                if last:
+                    step["logs"].append(last.get("content", ""))
+
+            step["status"] = "done"
+            step["logs"] = [str(item) for item in step["logs"] if str(item).strip()][:6]
+        except Exception as exc:  # noqa: BLE001 - visualise any failure in the UI
+            step["status"] = "error"
+            step["logs"] = [f"{type(exc).__name__}: {exc}"]
+            for future in state["steps"]:
+                if future["status"] == "pending":
+                    future["status"] = "skipped"
+            log.warning("studio_auto_step_failed", step=key, error=str(exc))
+            break
+        finally:
+            step["finished_at"] = _now_iso()
+            _write_pipeline(session_id, state)
+
+    state["running"] = False
+    state["finished_at"] = _now_iso()
+    _write_pipeline(session_id, state)
+    # Return a fresh snapshot: step bundles captured mid-run contain an older
+    # copy of the pipeline state.
+    return _bundle(session_id)
+
+
 async def chat(
     session_id: str, message: str, auto_plan: bool = True
 ) -> dict[str, Any]:
@@ -628,7 +808,7 @@ async def chat(
     _record(session_id, "user", message)
 
     draft = store.get_latest_draft(session_id)
-    live_context = context.build_context(message)
+    live_context = await asyncio.to_thread(context.build_context, message)
     decision = await asyncio.to_thread(
         _chat_model,
         message,
@@ -647,12 +827,10 @@ async def chat(
     intent = decision["intent"]
     if intent == "build" and auto_plan:
         try:
-            return await asyncio.to_thread(
-                research_and_plan,
+            return await auto_run(
                 session_id,
                 decision.get("idea") or message,
                 decision.get("source_url"),
-                False,
             )
         except StudioError as exc:
             _record(

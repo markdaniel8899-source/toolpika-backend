@@ -124,31 +124,43 @@ def _install_mocks(monkeypatch, code_ok: bool = True) -> None:
     )
 
 
-async def test_studio_full_flow(monkeypatch):
+async def test_chat_triggers_full_pipeline(monkeypatch):
     _install_mocks(monkeypatch)
     bundle = service.create_session(idea="count words")
     session_id = bundle["session"]["id"]
     assert bundle["context"]["tool_count"] == 1
 
+    # The chat decides the tool, so the whole pipeline runs automatically.
     bundle = await service.chat(session_id, "build a word count tool")
-    assert bundle["session"]["stage"] == "planned"
-    assert bundle["draft"]["status"] == "planned"
-
-    bundle = await service.generate(session_id)
-    assert bundle["draft"]["status"] == "generated", bundle["draft"].get("qa")
+    assert bundle["session"]["stage"] == "published"
+    assert bundle["draft"]["status"] == "published"
     assert bundle["draft"]["spec"]["slug"] == "word-count"
     assert len(bundle["draft"]["code_files"]) == 5
 
-    bundle = await service.apply(session_id)
-    assert bundle["draft"]["status"] == "generated"  # not applied on this server
-    assert any("no frontend" in item["content"] for item in bundle["messages"])
+    pipeline = bundle["pipeline"]
+    assert pipeline["running"] is False
+    assert [step["status"] for step in pipeline["steps"]] == ["done"] * 6
+    assert any("Decision: build" in log for log in pipeline["steps"][0]["logs"])
+    assert any("no frontend" in log.lower() for log in pipeline["steps"][3]["logs"])
 
-    bundle = await service.translate(session_id, ["de"])
-    assert bundle["draft"]["status"] == "translated"
 
-    bundle = await service.publish(session_id)
-    assert bundle["draft"]["status"] == "published"
-    assert bundle["session"]["stage"] == "published"
+async def test_auto_run_reports_failed_step(monkeypatch):
+    _install_mocks(monkeypatch)
+    monkeypatch.setattr(
+        service,
+        "generate",
+        lambda session_id: (_ for _ in ()).throw(
+            service.StudioError("generation exploded")
+        ),
+    )
+    bundle = service.create_session(idea="count words")
+    session_id = bundle["session"]["id"]
+    bundle = await service.auto_run(session_id, "count words")
+    statuses = [step["status"] for step in bundle["pipeline"]["steps"]]
+    assert statuses[0] == "done"
+    assert statuses[2] == "error"
+    assert statuses[3:] == ["skipped", "skipped", "skipped"]
+    assert "exploded" in bundle["pipeline"]["steps"][2]["logs"][0].lower()
 
 
 async def test_studio_code_failure_is_reported(monkeypatch):
@@ -188,3 +200,10 @@ def test_studio_endpoints(monkeypatch):
     config = client.get("/api/studio/config")
     assert config.status_code == 200
     assert config.json()["enabled"] is True
+
+    auto = client.post(
+        f"/api/studio/sessions/{session_id}/auto-run", json={"idea": "count words"}
+    )
+    assert auto.status_code == 200, auto.text
+    assert auto.json()["session"]["stage"] == "published"
+    assert len(auto.json()["pipeline"]["steps"]) == 6
