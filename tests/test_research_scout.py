@@ -76,6 +76,9 @@ def test_propose_ideas_parses_fenced_json(monkeypatch):
             "why_trending": "Asked 15 times on r/webdev this month",
             "short_description": "Count syllables in a sentence instantly.",
             "estimated_difficulty": "easy",
+            "search_volume": "high",
+            "competition": "low",
+            "target_audience": "Writers and students",
         },
         {
             "tool_name": "Hex to RGB",
@@ -102,6 +105,8 @@ def test_propose_ideas_parses_fenced_json(monkeypatch):
     ideas = research_scout.propose_ideas([{"url": "https://example.com", "content": "x"}])
     assert len(ideas) == 2
     assert ideas[0]["estimated_difficulty"] == "Easy"
+    assert ideas[0]["search_volume"] == "High"
+    assert ideas[0]["report_details"]["target_audience"] == "Writers and students"
     assert ideas[1]["category"] == "text"
     assert ideas[1]["estimated_difficulty"] == "Medium"
 
@@ -131,8 +136,10 @@ async def test_run_research_scout_saves_ideas(monkeypatch):
         "short_description": "Calculate percentages locally.",
         "estimated_difficulty": "Easy",
     }
-    monkeypatch.setattr(research_scout, "collect_sources", lambda: [{"url": "u"}])
-    monkeypatch.setattr(research_scout, "propose_ideas", lambda sources: [idea])
+    monkeypatch.setattr(research_scout, "collect_sources", lambda queries=None: [{"url": "u"}])
+    monkeypatch.setattr(
+        research_scout, "propose_ideas", lambda sources, topic=None: [idea]
+    )
     saved: list[dict[str, Any]] = []
 
     def fake_upsert(table, rows, conflict):

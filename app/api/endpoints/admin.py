@@ -6,11 +6,31 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from app.api.models.requests import IdeaStatusUpdate
-from app.api.models.responses import ToolIdea, as_idea
+from app.api.models.requests import ChatRequest, IdeaStatusUpdate
+from app.api.models.responses import ChatResponse, ToolIdea, as_idea
+from app.pipelines.chat_engine import ChatEngineError, handle_chat
+from app.pipelines.research_scout import ResearchScoutError
 from app.services import supabase_client
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat(payload: ChatRequest) -> ChatResponse:
+    """Chat with the RAG-aware strategist; research commands trigger the scout."""
+    history = [item.model_dump() for item in payload.history]
+    try:
+        result = await handle_chat(payload.message, payload.mode, history)
+    except (ChatEngineError, ResearchScoutError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return ChatResponse(
+        reply=result.reply,
+        action=result.action,
+        topic=result.topic,
+        ideas=result.ideas,
+        research=result.research,
+        context_tool_count=result.context_tool_count,
+    )
 
 
 @router.get("/ideas", response_model=list[ToolIdea])

@@ -25,7 +25,7 @@ def test_ready_has_research_providers():
     assert "groq" not in checks
 
 
-async def fake_scout():
+async def fake_scout(topic=None):
     return ResearchResult(
         ideas=[
             {

@@ -18,8 +18,9 @@ python -m pytest -q
 bash scripts/run_server.sh    # http://localhost:8000/docs
 ```
 
-Apply `database/003_cleanup_and_ideas.sql` in the Supabase SQL editor first.
-It drops the abandoned generation tables and creates the `tool_ideas` inbox.
+Apply `database/003_cleanup_and_ideas.sql` then `database/004_strategy_engine.sql`
+in the Supabase SQL editor. They create the `tool_ideas` inbox and add the
+report/stat columns used by the strategist.
 
 ---
 
@@ -41,7 +42,8 @@ It drops the abandoned generation tables and creates the `tool_ideas` inbox.
 | Method | Path | Purpose |
 | :--- | :--- | :--- |
 | `GET` | `/health`, `/ready` | Liveness / provider config |
-| `POST` | `/api/pipeline/research` | Run the scout now |
+| `POST` | `/api/admin/chat` | RAG strategist chat; research commands trigger the scout |
+| `POST` | `/api/pipeline/research` | Run the scout now (optional `{"topic": "..."}`) |
 | `GET` | `/api/admin/ideas` | All ideas, newest first |
 | `PATCH` | `/api/admin/ideas/{id}` | `{"status": "new|reviewed|rejected|building"}` |
 

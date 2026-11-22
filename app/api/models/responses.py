@@ -31,6 +31,9 @@ class ToolIdea(BaseModel):
     why_trending: str
     short_description: str
     estimated_difficulty: str = "Medium"
+    search_volume: str = "N/A"
+    competition: str = "N/A"
+    report_details: dict[str, Any] = Field(default_factory=dict)
     status: str = "new"
     created_at: str | None = None
 
@@ -42,7 +45,21 @@ class ResearchResponse(BaseModel):
     ideas: list[ToolIdea] = Field(default_factory=list)
     sources_count: int = 0
     queries_run: int = 0
+    topic: str | None = None
     detail: str = ""
+
+    model_config = {"extra": "ignore"}
+
+
+class ChatResponse(BaseModel):
+    """Result of one strategist chat turn."""
+
+    reply: str
+    action: str = "chat"
+    topic: str | None = None
+    ideas: list[ToolIdea] = Field(default_factory=list)
+    research: dict[str, Any] = Field(default_factory=dict)
+    context_tool_count: int = 0
 
     model_config = {"extra": "ignore"}
 
