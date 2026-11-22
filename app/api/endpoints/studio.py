@@ -38,6 +38,16 @@ async def studio_config() -> dict[str, Any]:
         "frontend_path_configured": bool(
             settings.studio_frontend_path or service.codegen.resolve_frontend_path()
         ),
+        "github_configured": bool(
+            settings.github_pat
+            and settings.github_repo_owner
+            and settings.github_repo_name
+        ),
+        "github_repo": f"{settings.github_repo_owner}/{settings.github_repo_name}"
+        if settings.github_repo_owner and settings.github_repo_name
+        else None,
+        "github_base_branch": settings.github_base_branch,
+        "auto_merge_pr": settings.studio_auto_merge_pr,
     }
 
 

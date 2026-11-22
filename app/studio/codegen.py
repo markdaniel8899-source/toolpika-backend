@@ -28,6 +28,11 @@ log = structlog.get_logger(__name__)
 GENERATED_DIR = Path("src/lib/tools/generated")
 MANIFEST_PATH = GENERATED_DIR / "manifest.json"
 
+# GitHub PR publishing targets (paths are relative to the frontend repository).
+COMPONENT_PATH_TEMPLATE = "src/components/tools/{slug}-tool.tsx"
+REGISTRY_PATH = "src/lib/tools/registry.ts"
+COMPONENT_MAP_PATH = "src/components/tools/generated-components.tsx"
+
 
 class StudioCodegenError(RuntimeError):
     """Raised when no usable code can be generated."""
@@ -499,3 +504,157 @@ def apply_files(files: list[dict[str, Any]]) -> dict[str, Any]:
 
     log.info("studio_files_applied", root=str(root), count=len(written))
     return {"applied": True, "root": str(root), "written": written}
+
+
+# ---------------------------------------------------------------------------
+# GitHub PR publishing helpers
+# ---------------------------------------------------------------------------
+
+
+def _component_name(slug: str) -> str:
+    """Build a valid PascalCase React component name from a tool slug."""
+    parts = [part for part in re.split(r"[^a-zA-Z0-9]+", slug) if part]
+    name = "".join(part[:1].upper() + part[1:] for part in parts) or "Tool"
+    if name[0].isdigit():
+        name = f"Tool{name}"
+    return f"{name}Tool"
+
+
+def render_component_tsx(blueprint: dict[str, Any], code: str) -> str:
+    """Wrap the QA-passed ``run`` function in a self-contained React component.
+
+    The UI itself lives in the shared ``GeneratedToolWorkspace`` component, so
+    this file contains only generated logic and metadata. No dynamic code or
+    arbitrary React from the model is shipped to visitors.
+    """
+    slug = str(blueprint["slug"])
+    internal = re.sub(
+        r"^\s*export\s+function\s+run",
+        "function run",
+        (code or "").strip(),
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if not internal.startswith("function run"):
+        raise StudioCodegenError("Generated code must export a run() function.")
+
+    meta = {
+        "slug": slug,
+        "title": blueprint.get("name") or slug,
+        "archetype": blueprint.get("archetype") or "text-transform",
+        "inputLabel": blueprint.get("input_label") or "Input",
+        "inputPlaceholder": blueprint.get("input_placeholder") or "Paste your content here.",
+        "runLabel": blueprint.get("run_label") or "Run",
+        "outputLabel": blueprint.get("output_label") or "Result",
+        "examples": blueprint.get("examples") or [],
+    }
+    return "\n".join(
+        [
+            '"use client";',
+            "",
+            'import { GeneratedToolWorkspace } from "@/components/tools/workspaces/generated-tool";',
+            "",
+            internal,
+            "",
+            f"const meta = {json.dumps(meta, ensure_ascii=False, indent=2)};",
+            "",
+            f"export default function {_component_name(slug)}() {{",
+            f'  return <GeneratedToolWorkspace slug="{slug}" run={{run}} meta={{meta}} />;',
+            "}",
+            "",
+        ]
+    )
+
+
+def _registry_entry(blueprint: dict[str, Any], spec: dict[str, Any]) -> str:
+    """Render one Tool entry for the static frontend registry."""
+    slug = str(blueprint["slug"])
+    seo = spec.get("seo") or {}
+    return (
+        "  {\n"
+        f"    id: {json.dumps(slug)},\n"
+        f"    slug: {json.dumps(slug)},\n"
+        f"    title: {json.dumps(str(spec.get('name') or blueprint.get('name') or slug), ensure_ascii=False)},\n"
+        f"    category: {json.dumps(str(blueprint.get('category') or 'text'))},\n"
+        f"    description: {json.dumps(str(seo.get('description') or blueprint.get('description') or ''), ensure_ascii=False)},\n"
+        f"    icon: {json.dumps(str(blueprint.get('icon') or 'Wand2'))},\n"
+        f"    inputs: {json.dumps(['text'])},\n"
+        "    clientSide: true,\n"
+        '    status: "live",\n'
+        "  },\n"
+    )
+
+
+def register_tool_in_registry(
+    source: str, blueprint: dict[str, Any], spec: dict[str, Any]
+) -> str:
+    """Insert a tool into ``registry.ts`` without duplicating an existing slug."""
+    slug = str(blueprint["slug"])
+    if f'slug: "{slug}"' in source or f'id: "{slug}"' in source:
+        return source
+    marker = "export const tools: Tool[] = ["
+    start = source.find(marker)
+    if start < 0:
+        raise StudioCodegenError(f"Cannot find the tools array in {REGISTRY_PATH}")
+    insert_at = source.find("\n", start)
+    if insert_at < 0:
+        raise StudioCodegenError(f"Malformed tools array in {REGISTRY_PATH}")
+    return source[: insert_at + 1] + _registry_entry(blueprint, spec) + source[insert_at + 1 :]
+
+
+_COMPONENT_MAP_HEADER = '''"use client";
+
+import dynamic from "next/dynamic";
+import type { ComponentType } from "react";
+import { WorkspaceSkeleton } from "@/components/ui/skeleton";
+
+const loading = () => <WorkspaceSkeleton />;
+
+export const generatedComponents: Record<string, ComponentType> = {
+'''
+
+_COMPONENT_MAP_FOOTER = "};\n"
+
+
+def register_generated_component(source: str, slug: str) -> str:
+    """Add a slug to the dynamic component map, creating the file if needed."""
+    safe = re.sub(r"[^a-zA-Z0-9-]", "", slug)
+    if not source.strip():
+        source = _COMPONENT_MAP_HEADER + _COMPONENT_MAP_FOOTER
+    if f'"{slug}": dynamic(' in source:
+        return source
+    marker = "export const generatedComponents: Record<string, ComponentType> = {\n"
+    start = source.find(marker)
+    if start < 0:
+        raise StudioCodegenError(f"Malformed generated component map in {COMPONENT_MAP_PATH}")
+    insert_at = start + len(marker)
+    line = f'  "{slug}": dynamic(() => import("./{safe}-tool"), {{ loading }}),\n'
+    return source[:insert_at] + line + source[insert_at:]
+
+
+def build_github_files(
+    blueprint: dict[str, Any],
+    spec: dict[str, Any],
+    code: str,
+    registry_source: str,
+    component_map_source: str,
+) -> list[dict[str, str]]:
+    """Build the three files committed in the GitHub PR."""
+    slug = str(blueprint["slug"])
+    return [
+        {
+            "path": COMPONENT_PATH_TEMPLATE.format(slug=slug),
+            "content": render_component_tsx(blueprint, code),
+            "kind": "component",
+        },
+        {
+            "path": REGISTRY_PATH,
+            "content": register_tool_in_registry(registry_source, blueprint, spec),
+            "kind": "registry",
+        },
+        {
+            "path": COMPONENT_MAP_PATH,
+            "content": register_generated_component(component_map_source, slug),
+            "kind": "registry",
+        },
+    ]

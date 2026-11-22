@@ -66,6 +66,13 @@ class Settings(BaseSettings):
     studio_codegen_model: str = ""
     studio_max_code_chars: int = 20000
 
+    # GitHub PR publishing for the Studio apply step
+    github_pat: str = ""
+    github_repo_owner: str = ""
+    github_repo_name: str = ""
+    github_base_branch: str = "main"
+    studio_auto_merge_pr: bool = False
+
     template_path: str = ""
 
     @property

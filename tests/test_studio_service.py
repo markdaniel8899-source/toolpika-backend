@@ -94,12 +94,18 @@ def _install_mocks(monkeypatch, code_ok: bool = True) -> None:
         service.codegen, "load_manifest", lambda root: {"version": 1, "tools": []}
     )
     monkeypatch.setattr(
-        service.codegen,
-        "apply_files",
-        lambda files: {
-            "applied": False,
-            "reason": "no frontend on this server",
-            "written": [],
+        service,
+        "_github_apply",
+        lambda draft: {
+            "success": True,
+            "applied": True,
+            "branch": "studio/add-word-count",
+            "pr_url": "https://github.com/hmzain/toolpika-frontend/pull/1",
+            "files": [
+                "src/components/tools/word-count-tool.tsx",
+                "src/lib/tools/registry.ts",
+                "src/components/tools/generated-components.tsx",
+            ],
         },
     )
 
@@ -141,7 +147,7 @@ async def test_chat_triggers_full_pipeline(monkeypatch):
     assert pipeline["running"] is False
     assert [step["status"] for step in pipeline["steps"]] == ["done"] * 6
     assert any("Decision: build" in log for log in pipeline["steps"][0]["logs"])
-    assert any("no frontend" in log.lower() for log in pipeline["steps"][3]["logs"])
+    assert any("PR:" in log for log in pipeline["steps"][3]["logs"])
 
 
 async def test_auto_run_reports_failed_step(monkeypatch):
