@@ -1,65 +1,61 @@
-"""Cron jobs for autonomous research and failed-job retries."""
+"""Cron jobs for the research scout. No build/QA/translation jobs exist."""
 
 from __future__ import annotations
 
-import asyncio
+from datetime import timezone
 
 import structlog
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
-from app.pipelines.orchestrator import run_full_pipeline
-from app.services import queue, supabase_client
+from app.pipelines.research_scout import run_research_scout
 
 log = structlog.get_logger(__name__)
 
-
-async def research_and_build() -> None:
-    """Run the autonomous daily research and build job."""
-    log.info("cron_research_started")
-    result = await run_full_pipeline()
-    log.info("cron_research_finished", success=result.success, stage=result.stage)
+scheduler = AsyncIOScheduler(timezone=timezone.utc)
 
 
-async def check_failed_jobs_and_retry() -> None:
-    """Retry tools that previously failed QA."""
+async def daily_research() -> None:
+    """Run the scout once and keep the scheduler alive on failure."""
+    log.info("cron_research_scout_started")
     try:
-        rows = supabase_client.select("tool_specs", "slug,status")
-    except Exception as exc:  # noqa: BLE001
-        log.warning("cron_retry_lookup_failed", error=str(exc))
-        return
-    failed = [row["slug"] for row in rows if row.get("status") == "qa_failed"]
-    for slug in failed:
-        log.info("cron_retrying_tool", slug=slug)
-        await run_full_pipeline(slug)
-        await asyncio.sleep(0)
+        result = await run_research_scout()
+        log.info("cron_research_scout_finished", ideas=len(result.ideas))
+    except Exception as exc:  # noqa: BLE001 - scheduler must not die
+        log.error("cron_research_scout_failed", error=str(exc))
 
 
-def install_jobs() -> None:
-    """Register cron jobs on the shared scheduler."""
+def start_scheduler() -> None:
+    """Start the scheduler and register the daily 03:00 UTC job."""
     if not settings.cron_research_enabled:
-        log.info("cron_research_disabled")
+        log.info("cron_research_scout_disabled")
         return
-    parts = settings.cron_research_schedule.split()
-    if len(parts) != 5:
-        log.warning("invalid_cron_schedule", value=settings.cron_research_schedule)
-        return
-    minute, hour, day, month, day_of_week = parts
-    queue.scheduler.add_job(
-        research_and_build,
-        trigger="cron",
-        minute=minute,
-        hour=hour,
-        day=day,
-        month=month,
-        day_of_week=day_of_week,
-        id="cron:research",
+    try:
+        trigger = CronTrigger.from_crontab(
+            settings.cron_research_schedule, timezone=timezone.utc
+        )
+    except Exception:  # noqa: BLE001 - fall back to the documented default
+        log.warning(
+            "invalid_cron_schedule",
+            value=settings.cron_research_schedule,
+            fallback="0 3 * * *",
+        )
+        trigger = CronTrigger(hour=3, minute=0, timezone=timezone.utc)
+
+    scheduler.add_job(
+        daily_research,
+        trigger=trigger,
+        id="cron:research_scout",
         replace_existing=True,
     )
-    queue.scheduler.add_job(
-        check_failed_jobs_and_retry,
-        trigger="interval",
-        hours=6,
-        id="cron:retry",
-        replace_existing=True,
-    )
-    log.info("cron_jobs_installed", schedule=settings.cron_research_schedule)
+    if not scheduler.running:
+        scheduler.start()
+    log.info("cron_research_scout_installed", schedule=settings.cron_research_schedule)
+
+
+def stop_scheduler() -> None:
+    """Stop the scheduler during application shutdown."""
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+        log.info("cron_scheduler_stopped")

@@ -1,57 +1,38 @@
-"""Admin dashboard, logs and manual cron triggers."""
+"""Admin endpoints for reviewing scouted tool ideas."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException
 
-from app.api.models.responses import ConfigResponse
-from app.config import settings
-from app.pipelines import cron_scheduler
-from app.services import queue, supabase_client
+from app.api.models.requests import IdeaStatusUpdate
+from app.api.models.responses import ToolIdea, as_idea
+from app.services import supabase_client
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
-@router.get("/pipeline-status")
-async def pipeline_status() -> dict[str, Any]:
-    """Return queue depth and the most recent pipeline runs."""
+@router.get("/ideas", response_model=list[ToolIdea])
+async def list_ideas() -> list[dict[str, Any]]:
+    """Return all ideas, newest first."""
     try:
-        runs = supabase_client.select(
-            "pipeline_runs", "stage,status,details,created_at"
-        )[-10:]
-    except Exception:  # noqa: BLE001 - admin view must not fail on missing table
-        runs = []
-    return {"queue_depth": queue.queue_depth(), "recent_runs": runs}
+        rows = supabase_client.select("tool_ideas", "*")
+    except Exception as exc:  # noqa: BLE001 - surface a clean API error
+        raise HTTPException(status_code=502, detail=f"Could not load ideas: {exc}") from exc
+    rows.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
+    return [as_idea(row) for row in rows]
 
 
-@router.get("/logs")
-async def logs(
-    stage: str | None = None,
-    status: str | None = None,
-    limit: int = Query(default=50, ge=1, le=500),
-) -> list[dict[str, Any]]:
-    """Return filtered pipeline log rows."""
+@router.patch("/ideas/{idea_id}", response_model=ToolIdea)
+async def update_idea(idea_id: str, payload: IdeaStatusUpdate) -> dict[str, Any]:
+    """Update the review status of one idea."""
     try:
-        rows = supabase_client.select("pipeline_runs", "stage,status,details,created_at")
-    except Exception:  # noqa: BLE001
-        return []
-    if stage:
-        rows = [row for row in rows if row.get("stage") == stage]
-    if status:
-        rows = [row for row in rows if row.get("status") == status]
-    return rows[-limit:]
-
-
-@router.post("/trigger-cron")
-async def trigger_cron() -> dict[str, Any]:
-    """Manually run the daily research job."""
-    await cron_scheduler.research_and_build()
-    return {"success": True, "detail": "cron triggered"}
-
-
-@router.get("/config", response_model=ConfigResponse)
-async def public_config() -> ConfigResponse:
-    """Expose safe pipeline settings to the frontend."""
-    return ConfigResponse(**settings.public_config())
+        updated = supabase_client.update(
+            "tool_ideas", {"status": payload.status}, {"id": idea_id}
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Could not update idea: {exc}") from exc
+    if not updated:
+        raise HTTPException(status_code=404, detail="Idea not found.")
+    return as_idea(updated[0])

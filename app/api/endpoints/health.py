@@ -30,6 +30,5 @@ async def ready() -> ReadyResponse:
         "supabase": bool(settings.supabase_url and settings.supabase_service_role_key),
         "tavily": bool(settings.tavily_api_key),
         "nemotron": bool(settings.nvidia_nim_api_key),
-        "groq": bool(settings.groq_api_key),
     }
     return ReadyResponse(ready=all(checks.values()), checks=checks)

@@ -7,23 +7,6 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-class PipelineResponse(BaseModel):
-    """Result of a pipeline trigger."""
-
-    success: bool
-    slug: str | None = None
-    stage: str
-    logs: list[str] = Field(default_factory=list)
-
-
-class TranslationResponse(BaseModel):
-    """Result of a translation trigger."""
-
-    success: bool
-    translated_locales: list[str] = Field(default_factory=list)
-    failed_locales: list[str] = Field(default_factory=list)
-
-
 class HealthResponse(BaseModel):
     """Liveness response."""
 
@@ -39,17 +22,31 @@ class ReadyResponse(BaseModel):
     checks: dict[str, bool]
 
 
-class ConfigResponse(BaseModel):
-    """Frontend-facing pipeline configuration."""
+class ToolIdea(BaseModel):
+    """One AI-scouted tool idea waiting for review."""
 
-    pipeline_enabled: bool
-    available_locales: list[str]
-    max_retries: int
+    id: str
+    tool_name: str
+    category: str
+    why_trending: str
+    short_description: str
+    estimated_difficulty: str = "Medium"
+    status: str = "new"
+    created_at: str | None = None
 
 
-class GenericResponse(BaseModel):
-    """Small generic success envelope."""
+class ResearchResponse(BaseModel):
+    """Result of a manual scout run."""
 
     success: bool
+    ideas: list[ToolIdea] = Field(default_factory=list)
+    sources_count: int = 0
+    queries_run: int = 0
     detail: str = ""
-    data: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = {"extra": "ignore"}
+
+
+def as_idea(row: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a Supabase row for the ToolIdea response model."""
+    return {key: value for key, value in row.items() if key in ToolIdea.model_fields}

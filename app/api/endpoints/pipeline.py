@@ -1,35 +1,25 @@
-"""Pipeline trigger endpoints."""
+"""Research-scout trigger endpoint."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
-from app.api.models.requests import ResearchRequest, TranslateRequest
-from app.api.models.responses import PipelineResponse, TranslationResponse
-from app.pipelines.orchestrator import run_full_pipeline
-from app.pipelines.translator import translate_tool
+from app.api.models.responses import ResearchResponse
+from app.pipelines.research_scout import ResearchScoutError, run_research_scout
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
 
 
-@router.post("/research-and-build", response_model=PipelineResponse)
-async def research_and_build(payload: ResearchRequest) -> PipelineResponse:
-    """Research, generate, QA, publish and schedule translation."""
-    result = await run_full_pipeline(payload.topic)
-    return PipelineResponse(
-        success=result.success,
-        slug=result.slug,
-        stage=result.stage,
-        logs=result.logs,
-    )
-
-
-@router.post("/translate", response_model=TranslationResponse)
-async def translate(payload: TranslateRequest) -> TranslationResponse:
-    """Run chunked translation for one tool."""
-    result = await translate_tool(payload.slug, payload.locales)
-    return TranslationResponse(
-        success=not result.failed_locales and not result.errors,
-        translated_locales=result.translated_locales,
-        failed_locales=result.failed_locales,
+@router.post("/research", response_model=ResearchResponse)
+async def research() -> ResearchResponse:
+    """Scout the web and store fresh tool ideas for admin review."""
+    try:
+        result = await run_research_scout()
+    except ResearchScoutError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return ResearchResponse(
+        success=True,
+        ideas=result.ideas,
+        sources_count=result.sources_count,
+        queries_run=result.queries_run,
     )

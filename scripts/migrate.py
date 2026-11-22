@@ -11,8 +11,12 @@ from pathlib import Path
 
 
 def migration_path() -> Path:
-    """Return the pipeline migration SQL path."""
-    return Path(__file__).resolve().parents[1] / "database" / "001_pipeline.sql"
+    """Return the research-inbox migration SQL path."""
+    return (
+        Path(__file__).resolve().parents[1]
+        / "database"
+        / "003_cleanup_and_ideas.sql"
+    )
 
 
 def main() -> None:
