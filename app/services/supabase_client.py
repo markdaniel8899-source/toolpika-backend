@@ -44,3 +44,33 @@ def select(table: str, columns: str = "*") -> list[dict[str, Any]]:
     except Exception as exc:
         log.error("supabase_select_failed", table=table, error=str(exc))
         raise
+
+
+def select_where(
+    table: str, columns: str = "*", **filters: Any
+) -> list[dict[str, Any]]:
+    """Select rows matching equality filters."""
+    try:
+        query = get_client().table(table).select(columns)
+        for key, value in filters.items():
+            query = query.eq(key, value)
+        response = query.execute()
+        return list(response.data or [])
+    except Exception as exc:
+        log.error("supabase_select_failed", table=table, error=str(exc))
+        raise
+
+
+def update(
+    table: str, values: dict[str, Any], filters: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Update rows matching equality filters and return the changed rows."""
+    try:
+        query = get_client().table(table).update(values)
+        for key, value in filters.items():
+            query = query.eq(key, value)
+        response = query.execute()
+        return list(response.data or [])
+    except Exception as exc:
+        log.error("supabase_update_failed", table=table, error=str(exc))
+        raise

@@ -5,13 +5,15 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.router import router
 from app.config import CORS_ORIGINS, settings
 from app.pipelines import cron_scheduler
 from app.services import queue
+from app.studio.service import StudioError
 
 log = structlog.get_logger(__name__)
 
@@ -43,3 +45,12 @@ app.add_middleware(
 )
 
 app.include_router(router)
+
+
+@app.exception_handler(StudioError)
+async def studio_error_handler(_request: Request, exc: StudioError) -> JSONResponse:
+    """Turn expected studio workflow errors into readable 400 responses."""
+    return JSONResponse(
+        status_code=400,
+        content={"detail": str(exc), "data": exc.details},
+    )

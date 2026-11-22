@@ -53,7 +53,9 @@ def test_full_pipeline_qa_failure_marks_status(monkeypatch, research):
     monkeypatch.setattr(orchestrator, "correct_spec", lambda s, e: s)
     statuses = []
     monkeypatch.setattr(
-        orchestrator.publisher, "mark_status", lambda slug, status: statuses.append((slug, status))
+        orchestrator.publisher,
+        "mark_status",
+        lambda slug, status, spec=None: statuses.append((slug, status)),
     )
     monkeypatch.setattr(orchestrator, "_log_run", lambda *a, **k: None)
 

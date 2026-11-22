@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     nemotron_model: str = "nvidia/nemotron-3.5-super-vl-120b-a12b"
     groq_model: str = "llama-3.3-70b-versatile"
 
+    # Tool Studio (admin chat + code generation)
+    studio_enabled: bool = True
+    studio_frontend_path: str = ""
+    studio_context_specs: int = 5
+    studio_run_typecheck: bool = False
+    studio_codegen_model: str = ""
+    studio_max_code_chars: int = 20000
+
     template_path: str = ""
 
     @property

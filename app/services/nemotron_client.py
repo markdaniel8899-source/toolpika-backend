@@ -22,14 +22,21 @@ def _strip_markdown(text: str) -> str:
     return cleaned.strip()
 
 
-def generate_json(system_prompt: str, user_prompt: str) -> dict[str, Any]:
+def generate_json(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    model: str | None = None,
+    temperature: float = 0.3,
+    max_tokens: int = 4000,
+) -> dict[str, Any]:
     """Call Nemotron and parse its JSON response."""
     if not settings.nvidia_nim_api_key:
         raise RuntimeError("NVIDIA_NIM_API_KEY is not configured")
     payload = {
-        "model": settings.nemotron_model,
-        "temperature": 0.3,
-        "max_tokens": 4000,
+        "model": model or settings.nemotron_model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
         # Nemotron 3.5 reasons by default; disable it so the response body is
         # the JSON object rather than chain-of-thought text.
         "chat_template_kwargs": {"enable_thinking": False},

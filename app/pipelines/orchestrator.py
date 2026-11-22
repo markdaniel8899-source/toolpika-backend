@@ -13,6 +13,7 @@ from app.config import settings
 from app.pipelines import generator, publisher, research, translator
 from app.qa.self_corrector import correct_spec
 from app.qa.validator import validate_spec
+from app.registry import seed_slugs
 from app.services import supabase_client
 from app.templates.tool_template import ValidationResult
 
@@ -37,12 +38,22 @@ def source_hash(spec: dict[str, Any]) -> str:
 
 
 def _known_slugs() -> list[str]:
-    """Return slugs for relatedTools validation."""
+    """Return slugs for relatedTools validation.
+
+    The static frontend registry is always included so the very first tool can
+    reference tools that already exist on the site even before Supabase has any
+    published rows.
+    """
+    slugs = set(seed_slugs())
     try:
-        return [str(row.get("slug")) for row in publisher.list_tools() if row.get("slug")]
+        slugs.update(
+            str(row.get("slug"))
+            for row in publisher.list_tools()
+            if row.get("slug")
+        )
     except Exception as exc:  # noqa: BLE001 - QA should still run
         log.warning("registry_lookup_failed", error=str(exc))
-        return []
+    return sorted(slugs)
 
 
 def _log_run(stage: str, status: str, details: dict[str, Any]) -> None:
@@ -97,9 +108,16 @@ async def run_full_pipeline(tool_slug: str | None = None) -> PipelineResult:
         if not validation.isValid:
             result.stage = "qa_failed"
             result.logs.append(f"qa failed after {attempts} attempts")
-            if result.slug:
-                publisher.mark_status(result.slug, "qa_failed")
+            # Persist the errors before touching the status row: a status write
+            # must never hide the reason QA failed.
             _log_run("qa", "failed", {"slug": result.slug, "errors": validation.errors})
+            if result.slug:
+                try:
+                    publisher.mark_status(result.slug, "qa_failed", spec)
+                except Exception as exc:  # noqa: BLE001 - keep the QA outcome
+                    log.warning(
+                        "qa_status_update_failed", slug=result.slug, error=str(exc)
+                    )
             return result
 
         result.stage = "publish"
